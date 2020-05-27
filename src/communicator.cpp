@@ -3,16 +3,9 @@
 namespace communicator
 {
 
-Interface::Interface()
+Communicator::Communicator(Interface &interface) : mIf(interface)
 {
-}
 
-Interface::~Interface()
-{
-}
-
-Communicator::Communicator(Interface &interface)
-{
 }
 
 Communicator::~Communicator()
