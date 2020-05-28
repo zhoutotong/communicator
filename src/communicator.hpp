@@ -17,14 +17,14 @@ namespace communicator
 
 class Interface
 {
-private:
+protected:
 typedef void(*RecvCallback)(const uint8_t *buf, uint32_t len);
 public:
     Interface(const AString &name) : mInterfaceName(name), mRecvCb(nullptr){}
     ~Interface(){};
 
     // 初始化参数配置
-    virtual void setup(const char* cfg, uint32_t len){}
+    virtual void setup(const void* cfg, uint32_t len){}
     // 释放通信资源
     virtual void release(){}
 
@@ -38,10 +38,15 @@ public:
     virtual void send(const AString &buf) { UNSUPORT_FUNC_EXCEPTION(mInterfaceName); };
 
     // 非堵塞接收数据
-    virtual void recv(const uint8_t *buf, uint32_t len){}
+    virtual void recv(uint8_t *buf, uint32_t *len){}
 
     // 设置数据接收回调，设置后将屏蔽非堵塞接收数据方法
-    void installRecvCallback(const RecvCallback cb) { mRecvCb = cb; };
+    virtual void installRecvCallback(const RecvCallback cb) { mRecvCb = cb; };
+
+
+    // 获取传输包信息
+    virtual size_t getSendSeq() { UNSUPORT_FUNC_EXCEPTION(mInterfaceName); };
+    virtual size_t getRecvSeq() { UNSUPORT_FUNC_EXCEPTION(mInterfaceName); };
 
 private:
 

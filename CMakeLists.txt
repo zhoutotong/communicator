@@ -30,8 +30,13 @@ INCLUDE_DIRECTORIES(
 # 子目录
 add_subdirectory(src)
 
-ADD_EXECUTABLE(${PROJECT_NAME} main.cpp)
+ADD_EXECUTABLE(sender sender.cpp)
+ADD_EXECUTABLE(recver recver.cpp)
 
-target_link_libraries(${PROJECT_NAME} 
+target_link_libraries(sender
+communicator
+)
+
+target_link_libraries(recver
 communicator
 )
