@@ -20,21 +20,33 @@ private:
         DirectTransRead = 3,   ///< 此状态下正在进行读出操作
     };
     struct _DirectTransParams {
+        size_t num_of_buf;
         size_t size;
     };
 
-    struct _DirectTransHead {
-        pthread_mutex_t mutex;
-        _DirectTransStatus status;
+    struct _ShareMemHead {
+        pthread_mutex_t share_mutex;
+        size_t num_of_buf;
+        size_t cur_read_ptr;
+        size_t cur_write_ptr;
+        size_t max_busy_cnt;
         size_t seq;
         size_t size;
         timeval timestamp;
     };
 
+    struct _ShareMemStatus {
+        _DirectTransStatus status;
+        size_t busy_read_cnt;    ///< 在尝试写入时，如该buffer处于读状态，则该计数加1
+    };
+
+protected:
+    typedef _ShareMemStatus ShareMemStatus;
+    typedef _ShareMemHead   ShareMemHead;
+
 public:
     typedef _DirectTransParams DirectTransParams;
     typedef _DirectTransStatus DirectTransStatus;
-    typedef _DirectTransHead   DirectTransHead;
 
 public:
     DirectTrans(const awe::AString &name, const int id = 0);
@@ -71,16 +83,20 @@ private:
     std::thread *mRecThread;
     bool mIsRecWorking;
 
-    const size_t mBufferSize;
+    size_t mBufferSize;
+    size_t mMaxBusyCnt;
 
-    DirectTransHead *mHeaderPtr;
+    ShareMemHead *mHeaderPtr;
+    uint8_t *mShareBufs;
 
     int __getAttchedNum(int id);
     size_t __getAttchedSize(int id);
 
     void __initMutex(pthread_mutex_t *m);
     uint8_t* __getWritablePtr();
+    void __releaseWritablePtr(uint8_t* p);
     uint8_t* __getReadablePtr();
+    void __releaseReadablePtr(uint8_t* p);
 
 
 };
