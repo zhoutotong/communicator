@@ -9,15 +9,16 @@ int main(int argc, char *argv[])
     communicator::Interface *interface = new communicator::DirectTrans("Direct_trans");
     communicator::DirectTrans::DirectTransParams params;
     params.size = 1024;
+    params.num_of_buf = 10;
     uint8_t *pbuf = new uint8_t[params.size];
     interface->setup(&params, sizeof(params));
 
-    int cnt = 100000;
+    int cnt = 10000;
     while(cnt--)
     {
         interface->send((const uint8_t*)"hello world", sizeof("hello world"));
         // std::cout << "send data: " << interface->getSendSeq() << std::endl;
-        // sleep(1);
+        // usleep(1);
     }
 
     interface->release();

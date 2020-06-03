@@ -17,6 +17,8 @@ int main(int argc, char *argv[])
     interface = new communicator::DirectTrans("Direct_trans");
     communicator::DirectTrans::DirectTransParams params;
     params.size = 1024;
+    params.num_of_buf = 10;
+
     uint8_t *pbuf = new uint8_t[params.size];
     interface->setup(&params, sizeof(params));
 

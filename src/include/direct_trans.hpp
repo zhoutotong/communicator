@@ -38,6 +38,7 @@ private:
     struct _ShareMemStatus {
         _DirectTransStatus status;
         size_t busy_read_cnt;    ///< 在尝试写入时，如该buffer处于读状态，则该计数加1
+        timeval timestamp;
     };
 
 protected:
@@ -97,6 +98,9 @@ private:
     void __releaseWritablePtr(uint8_t* p);
     uint8_t* __getReadablePtr();
     void __releaseReadablePtr(uint8_t* p);
+
+    int __timedMutexLock(pthread_mutex_t *m, uint32_t usec);
+    void __checkErrorCode(const int e);
 
 
 };
