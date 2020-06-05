@@ -233,17 +233,22 @@ void DirectTrans::send(const uint8_t *buf, uint32_t len)
     // 判断当前状态，当变为可写状态是写入
     ShareMemHead *pHead = static_cast<ShareMemHead*>(mShareMemPtr);
     uint8_t* pbuf = __getWritablePtr();
+    ShareMemStatus* pStatus = (ShareMemStatus*)pbuf;
+    pbuf += sizeof(ShareMemStatus);
 
-    if(!pbuf)
+    if(!pStatus)
     {
         throw AException("Can Not Get Avaiable Write Buffer.");
     }
     // 取较小的size进行发送
-    size_t s = mSize < len ? pHead->size : len;
+    size_t s = pHead->size < len ? pHead->size : len;
+    pStatus->size = s;
+    // 设置时间戳
+    gettimeofday(&pStatus->timestamp, nullptr);
     // 写入缓存
     memcpy(pbuf, buf, s);
     mSendSeq++;
-    __releaseWritablePtr(pbuf);
+    __releaseWritablePtr((uint8_t*)pStatus);
 }
 
 // 非堵塞接收数据
@@ -255,15 +260,17 @@ void DirectTrans::recv(uint8_t *buf, uint32_t *len)
     }
 
     uint8_t* pbuf = __getReadablePtr();
+    ShareMemStatus* pStatus = (ShareMemStatus*)pbuf;
+    pbuf += sizeof(ShareMemStatus);
     if(pbuf)
     {
         // 取较小的size进行接收
-        size_t s = mSize < *len ? mSize : *len;
+        size_t s = mHeaderPtr->size < *len ? mHeaderPtr->size : *len;
         // 取出数据区域
         memcpy(buf, pbuf, s);
         mRecvSeq++;
         *len = s;
-        __releaseReadablePtr(pbuf);
+        __releaseReadablePtr((uint8_t*)pStatus);
     }
     else
     {
@@ -284,12 +291,21 @@ void DirectTrans::installRecvCallback(const RecvCallback cb)
             while(mIsRecWorking)
             {
                 uint8_t* pbuf = __getReadablePtr();
-                if(pbuf)
+                ShareMemStatus* pStatus = (ShareMemStatus*)pbuf;
+                pbuf += sizeof(ShareMemStatus);
+
+                if(pStatus)
                 {
+                    // 计算延迟
+                    timeval tv;
+                    gettimeofday(&tv, nullptr);
+                    int dt = -(pStatus->timestamp.tv_sec * 1e6 + pStatus->timestamp.tv_usec \
+                                    - tv.tv_usec - (tv.tv_sec * 1e6));
+                    std::cout << "get new size: " << pStatus->size << ", dt is: " << dt << std::endl;
                     // 取出数据区域
-                    mRecvCb(pbuf, mSize);
+                    mRecvCb(pbuf, pStatus->size);
                     mRecvSeq++;
-                    __releaseReadablePtr(pbuf);
+                    __releaseReadablePtr((uint8_t*)pStatus);
                 }
                 else
                 {
@@ -340,10 +356,10 @@ uint8_t* DirectTrans::__getWritablePtr()
 {
     // 尝试三次，失败就返回
     uint8_t *wbuffer = nullptr;
-    for(int i = 0; i < 1000000; i++)
+    while(true)
     {
         // 进行加锁
-        int r = __timedMutexLock(&mHeaderPtr->share_mutex, 1000);
+        int r = __timedMutexLock(&mHeaderPtr->share_mutex, SEND_LOCK_TIME_OUT);
         if(r == 0)
         {
             size_t &wcptr = mHeaderPtr->cur_write_ptr;
@@ -353,52 +369,50 @@ uint8_t* DirectTrans::__getWritablePtr()
                                             (wcptr * (sizeof(ShareMemStatus) + mHeaderPtr->size)));
 
             // 检查当前写 buffer 是否空闲，等待空闲时写入
+            // 如果当前只有一个接入的话就处于独占状态，这样的话就持续写入
+            // 在这里一直等待，直到占用的节点读取完毕，或者退出
             if(curBufStatus->status != DirectTransFree && 1 < __getAttchedNum(mShareMemId))
             {
                 curBufStatus->busy_read_cnt++;
+                pthread_mutex_unlock(&mHeaderPtr->share_mutex);
+                usleep(1000);
+                continue;
             }
             else
             {
                 // 清空忙计数
                 curBufStatus->busy_read_cnt = 0;
-                // 设置时间戳
-                gettimeofday(&curBufStatus->timestamp, nullptr);
                 // 获取可用指针
                 curBufStatus->status = DirectTransWrite; // 将这个buffer设置为写入状态
-                wbuffer = (uint8_t *)curBufStatus + sizeof(ShareMemStatus);
+                wbuffer = (uint8_t *)curBufStatus;
             }
 
             // 处理完毕进行解锁
             pthread_mutex_unlock(&mHeaderPtr->share_mutex);
-            if(wbuffer)
-            {
-                break;
-            }
+            break;
         }
 
         __checkErrorCode(r);
         usleep(10);
     }
+
     return wbuffer;
 }
 
 // 获取可读取的地址
 uint8_t* DirectTrans::__getReadablePtr()
 {
-    // 尝试三次，失败就返回
-    for(int i = 0; i < 3; i++)
-    {
     // 进行加锁
-    int r = __timedMutexLock(&mHeaderPtr->share_mutex, 1000);
+    int r = __timedMutexLock(&mHeaderPtr->share_mutex, 500000);
     if(r == 0)
     {
         size_t &rcptr = mHeaderPtr->cur_read_ptr;
         size_t cnt = 0;
-        uint8_t *p = nullptr;
+        uint8_t *rbuffer = nullptr;
         ShareMemStatus* curBufStatus = nullptr;
 
         // 当前的读方案是遍历全部指针，找到可读的地址
-        while(cnt < mHeaderPtr->size)
+        while(cnt < mHeaderPtr->num_of_buf)
         {
             cnt++;
             // 获取当前状态
@@ -410,7 +424,7 @@ uint8_t* DirectTrans::__getReadablePtr()
             {
                 // 获取可用指针
                 curBufStatus->status = DirectTransRead; // 将这个buffer设置为写入状态
-                p = (uint8_t*)curBufStatus + sizeof(ShareMemStatus);
+                rbuffer = (uint8_t*)curBufStatus;
 
                 timeval rect;
                 gettimeofday(&rect, nullptr);
@@ -418,7 +432,6 @@ uint8_t* DirectTrans::__getReadablePtr()
                 uint64_t sendt = curBufStatus->timestamp.tv_sec * 1e6 + \
                                 curBufStatus->timestamp.tv_usec;
                 uint64_t dt = rect.tv_sec * 1e6 + rect.tv_usec - sendt;
-                std::cout << "trans dt: " << dt << std::endl;
 
                 break;
             }
@@ -429,51 +442,40 @@ uint8_t* DirectTrans::__getReadablePtr()
         }
 
         pthread_mutex_unlock(&mHeaderPtr->share_mutex);
-        return p;
+        return rbuffer;
     }
 
-    switch (r)
-    {
-    case ETIMEDOUT:
-        std::cout << "Mutex Time Out." << std::endl;
-        break;
-    case EINVAL:
-        std::cout << "Invalid Argument" << std::endl;
-    default:
-        break;
-    }
-    }
+    __checkErrorCode(r);
     return nullptr;
 }
 
 void DirectTrans::__releaseWritablePtr(uint8_t* p)
 {
     // 进行加锁
-    timespec ts = {0, 0};
-    clock_gettime(CLOCK_REALTIME, &ts);
-    ts.tv_nsec += 1e6;
-    int r = pthread_mutex_timedlock(&mHeaderPtr->share_mutex, &ts);
+    int r = __timedMutexLock(&mHeaderPtr->share_mutex, SEND_LOCK_TIME_OUT);
     if(r == 0)
     {
-        ShareMemStatus *pStatus = (ShareMemStatus*)(p - sizeof(ShareMemStatus));
+        ShareMemStatus *pStatus = (ShareMemStatus*)(p);
 
         pStatus->status = DirectTransWait;// 切换内存状态到等待读取状态
         size_t &wcptr = mHeaderPtr->cur_write_ptr;
         wcptr = (wcptr + 1) % mHeaderPtr->num_of_buf;// 移动写指针到下一个buffer
         pthread_mutex_unlock(&mHeaderPtr->share_mutex);
     }
+    else
+    {
+        __checkErrorCode(r);
+    }
+
     return;
 }
 void DirectTrans::__releaseReadablePtr(uint8_t* p)
 {
     // 进行加锁
-    timespec ts = {0, 0};
-    clock_gettime(CLOCK_REALTIME, &ts);
-    ts.tv_nsec += 1e6;
-    int r = pthread_mutex_timedlock(&mHeaderPtr->share_mutex, &ts);
+    int r = __timedMutexLock(&mHeaderPtr->share_mutex, RECV_LOCK_TIME_OUT);
     if(r == 0)
     {
-        ShareMemStatus *pStatus = (ShareMemStatus*)(p - sizeof(ShareMemStatus));
+        ShareMemStatus *pStatus = (ShareMemStatus*)(p);
 
         pStatus->status = DirectTransFree;// 修改内存状态
         size_t &rcptr = mHeaderPtr->cur_read_ptr;
@@ -489,7 +491,7 @@ int DirectTrans::__timedMutexLock(pthread_mutex_t *m, uint32_t usec)
     int r = 0;
     timeval tv;
     gettimeofday(&tv, nullptr);
-    uint32_t now = tv.tv_sec * 1e6 + tv.tv_usec;
+    uint32_t now = tv.tv_sec * 1000000 + tv.tv_usec;
     const uint32_t start = now;
 
     while(now - start < usec)
@@ -501,8 +503,8 @@ int DirectTrans::__timedMutexLock(pthread_mutex_t *m, uint32_t usec)
         }
 
         gettimeofday(&tv, nullptr);
-        now = tv.tv_sec * 1e6 + tv.tv_usec;
-        usleep((now - start) / 2);
+        now = tv.tv_sec * 1000000 + tv.tv_usec;
+        usleep(5);
     }
 
     return r;

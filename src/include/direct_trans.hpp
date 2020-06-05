@@ -38,6 +38,7 @@ private:
     struct _ShareMemStatus {
         _DirectTransStatus status;
         size_t busy_read_cnt;    ///< 在尝试写入时，如该buffer处于读状态，则该计数加1
+        size_t size;
         timeval timestamp;
     };
 
@@ -89,6 +90,11 @@ private:
 
     ShareMemHead *mHeaderPtr;
     uint8_t *mShareBufs;
+
+    enum {
+        SEND_LOCK_TIME_OUT = 500000,
+        RECV_LOCK_TIME_OUT = 500000,
+    };
 
     int __getAttchedNum(int id);
     size_t __getAttchedSize(int id);

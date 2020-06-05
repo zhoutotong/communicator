@@ -7,16 +7,19 @@ communicator::Interface *interface;
 
 void recvCallback(const uint8_t *buf, uint32_t len)
 {
-    std::cout << "recv data: " << (char*)buf << " " << interface->getRecvSeq() << std::endl;
-
+    // std::cout << "recv data: " << (char*)buf << " " << interface->getRecvSeq() << std::endl;
+    static size_t cnt = 0;
+    cnt++;
+    std::cout << "recv cnt: " << cnt << " - " << (char*)buf << std::endl;
 }
 
 int main(int argc, char *argv[])
 {
-    std::cout << "this is communicator program..." << std::endl;
+    std::cout << "this is communicator program for recver..." << std::endl;
     interface = new communicator::DirectTrans("Direct_trans");
     communicator::DirectTrans::DirectTransParams params;
-    params.size = 1024;
+    const size_t memSize = 1024 * 1024 * 10;
+    params.size = memSize;
     params.num_of_buf = 10;
 
     uint8_t *pbuf = new uint8_t[params.size];
@@ -24,7 +27,7 @@ int main(int argc, char *argv[])
 
     interface->installRecvCallback(recvCallback);
 
-    while(interface->getRecvSeq() < 100000)
+    while(true)
     {
         sleep(1);
     }
