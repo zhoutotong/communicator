@@ -73,6 +73,9 @@ public:
     inline size_t getSendSeq() override { return mSendSeq; }
     inline size_t getRecvSeq() override { return mRecvSeq; }
 
+    uint8_t* getBuffer(size_t len);
+    void releaseBuffer(uint8_t* buf);
+
 private:
     const int mId;
     size_t mSize;

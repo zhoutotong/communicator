@@ -1,8 +1,7 @@
 #pragma once
 
 #include <iostream>
-
-#include "device/device.hpp"
+#include <functional>
 
 #include "utilities/typedef.hpp"
 #include "utilities/aexception.hpp"
@@ -18,7 +17,11 @@ namespace communicator
 class Interface
 {
 protected:
-typedef void(*RecvCallback)(const uint8_t *buf, uint32_t len);
+// typedef void(*RecvCallback)(const uint8_t *buf, uint32_t len);
+
+using RecvCallback = std::function<void (uint8_t *, uint32_t)>;
+
+
 public:
     Interface(const AString &name) : mInterfaceName(name), mRecvCb(nullptr){}
     ~Interface(){};

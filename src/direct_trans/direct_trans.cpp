@@ -49,8 +49,6 @@ void DirectTrans::setup(const void* cfg, uint32_t len)
     mSize = sizeof(ShareMemHead) + \
             (params->size + sizeof(ShareMemStatus)) * mBufferSize;
 
-    std::cout << "share mem buffer size: " << mSize << std::endl;
-
     // 检查文件是否存在，不存在则尝试创建
     int r = 0;
     r = access(mInterfaceName.c_str(), F_OK);
@@ -227,6 +225,40 @@ void DirectTrans::setDestination(const uint32_t &id)
 
 }
 
+uint8_t* DirectTrans::getBuffer(size_t len)
+{
+    // 判断当前状态，当变为可写状态是写入
+    ShareMemHead *pHead = static_cast<ShareMemHead*>(mShareMemPtr);
+    uint8_t* pbuf = __getWritablePtr();
+    ShareMemStatus* pStatus = (ShareMemStatus*)pbuf;
+    pbuf += sizeof(ShareMemStatus);
+
+    if(!pStatus)
+    {
+        throw AException("Can Not Get Avaiable Write Buffer.");
+    }
+
+    if(pHead->size < len)
+    {
+        std::stringstream ss;
+        ss << "Get Size Of Buffer Is Too Large." << std::endl \
+        << "Max Size: " << pHead->size << " Then Require: " << len << std::endl;
+        throw AException(ss.str());
+    }
+
+    pStatus->size = len;
+
+    // 设置时间戳
+    gettimeofday(&pStatus->timestamp, nullptr);
+    mSendSeq++;
+
+    return pbuf;
+}
+void DirectTrans::releaseBuffer(uint8_t* buf)
+{
+    __releaseWritablePtr(buf - sizeof(ShareMemStatus));
+}
+
 // 发送数据
 void DirectTrans::send(const uint8_t *buf, uint32_t len)
 {
@@ -301,7 +333,6 @@ void DirectTrans::installRecvCallback(const RecvCallback cb)
                     gettimeofday(&tv, nullptr);
                     int dt = -(pStatus->timestamp.tv_sec * 1e6 + pStatus->timestamp.tv_usec \
                                     - tv.tv_usec - (tv.tv_sec * 1e6));
-                    std::cout << "get new size: " << pStatus->size << ", dt is: " << dt << std::endl;
                     // 取出数据区域
                     mRecvCb(pbuf, pStatus->size);
                     mRecvSeq++;
@@ -375,7 +406,6 @@ uint8_t* DirectTrans::__getWritablePtr()
             {
                 curBufStatus->busy_read_cnt++;
                 pthread_mutex_unlock(&mHeaderPtr->share_mutex);
-                usleep(1000);
                 continue;
             }
             else
@@ -432,7 +462,6 @@ uint8_t* DirectTrans::__getReadablePtr()
                 uint64_t sendt = curBufStatus->timestamp.tv_sec * 1e6 + \
                                 curBufStatus->timestamp.tv_usec;
                 uint64_t dt = rect.tv_sec * 1e6 + rect.tv_usec - sendt;
-
                 break;
             }
             else
@@ -440,6 +469,7 @@ uint8_t* DirectTrans::__getReadablePtr()
                 rcptr = (rcptr + 1) % mHeaderPtr->num_of_buf;
             }
         }
+
 
         pthread_mutex_unlock(&mHeaderPtr->share_mutex);
         return rbuffer;
