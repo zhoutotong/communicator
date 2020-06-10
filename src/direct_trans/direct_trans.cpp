@@ -8,9 +8,11 @@
 
 #include <sys/time.h>
 
+#include "utilities/systools.hpp"
+
 namespace communicator
 {
-DirectTrans::DirectTrans(const awe::AString &name, const int id) : Interface(name)
+DirectTrans::DirectTrans(const awe::AString &name, const int id, const TransMode &mode) : Interface(name, mode)
    , mId(id)
    , mSize(0)
    , mShareMemPtr(nullptr)
@@ -24,6 +26,7 @@ DirectTrans::DirectTrans(const awe::AString &name, const int id) : Interface(nam
    , mHeaderPtr(nullptr)
    , mShareBufs(nullptr)
    , mMaxBusyCnt(10)
+   , mSelfReadCnt(0)
 {
 
 }
@@ -135,6 +138,34 @@ void DirectTrans::setup(const void* cfg, uint32_t len)
     mHeaderPtr = static_cast<ShareMemHead*>(mShareMemPtr);
     mShareBufs = static_cast<uint8_t*>(mShareMemPtr) + sizeof(ShareMemHead);
 
+    // 如果是发送者，则先检查是否已经存在发送者，存在则不再运行
+    if(mTransMode == TransSendSimplex)
+    {
+        std::string procName;
+        if(0 == awe::systools::getNameByPid(mHeaderPtr->sender_pid, procName))
+        {
+            std::string senderName(mHeaderPtr->sender_name);
+            if(procName == senderName)
+            {
+                // 释放挂接状态
+                release();
+                // 抛出异常提示
+                std::stringstream ss;
+                ss << "Already Are Sender Named <" << mInterfaceName << ">." << std::endl;
+                throw awe::AException(ss.str());
+            }
+        }
+    }
+
+    // 记录发送者相关信息
+    if(mTransMode == TransSendSimplex)
+    {
+        mHeaderPtr->sender_pid = getpid();
+        std::string procName;
+        awe::systools::getNameByPid(getpid(), procName);
+        // 保存发送线程的名称
+        memcpy(mHeaderPtr->sender_name, procName.c_str(), procName.size());
+    }
 
     // 检查当前连接的数量，如果为 1 则初始化状态参数
     int num = __getAttchedNum(mShareMemId);
@@ -146,6 +177,7 @@ void DirectTrans::setup(const void* cfg, uint32_t len)
         mHeaderPtr->cur_read_ptr = 0;
         mHeaderPtr->cur_write_ptr = 0;
         mHeaderPtr->seq = 0;
+
         gettimeofday(&mHeaderPtr->timestamp, nullptr);
 
         __initMutex(&mHeaderPtr->share_mutex);
@@ -158,9 +190,11 @@ void DirectTrans::setup(const void* cfg, uint32_t len)
             
             p->status = DirectTransFree;
             p->busy_read_cnt = 0;
+            p->num_of_read_time = 0;
         }
 
     }
+    mSelfReadCnt = mHeaderPtr->cur_read_ptr;
 
 }
 // 释放通信资源
@@ -170,9 +204,12 @@ void DirectTrans::release()
     if(mIsRecWorking)
     {
         mIsRecWorking = false;
-        mRecThread->join();
-        delete mRecThread;
-        mRecThread = nullptr;
+        if(mRecThread)
+        {
+            mRecThread->join();
+            delete mRecThread;
+            mRecThread = nullptr;
+        }
     }
 
     // 解除挂接状态
@@ -402,7 +439,9 @@ uint8_t* DirectTrans::__getWritablePtr()
             // 检查当前写 buffer 是否空闲，等待空闲时写入
             // 如果当前只有一个接入的话就处于独占状态，这样的话就持续写入
             // 在这里一直等待，直到占用的节点读取完毕，或者退出
-            if(curBufStatus->status != DirectTransFree && 1 < __getAttchedNum(mShareMemId))
+            if(curBufStatus->status != DirectTransFree && \
+                curBufStatus->status != DirectTransWrite && \
+                1 < __getAttchedNum(mShareMemId))
             {
                 curBufStatus->busy_read_cnt++;
                 pthread_mutex_unlock(&mHeaderPtr->share_mutex);
@@ -421,6 +460,12 @@ uint8_t* DirectTrans::__getWritablePtr()
             pthread_mutex_unlock(&mHeaderPtr->share_mutex);
             break;
         }
+        else
+        {
+            // 发送时如果超时了检查所有buffer状态，如果都是 free 那么就是上次发送退出时没有解锁导致的，此时要进行一下解锁操作
+            __checkFreeWriteAndUnlock();
+        }
+        
 
         __checkErrorCode(r);
         usleep(10);
@@ -436,7 +481,7 @@ uint8_t* DirectTrans::__getReadablePtr()
     int r = __timedMutexLock(&mHeaderPtr->share_mutex, 500000);
     if(r == 0)
     {
-        size_t &rcptr = mHeaderPtr->cur_read_ptr;
+        size_t &rcptr = mSelfReadCnt;
         size_t cnt = 0;
         uint8_t *rbuffer = nullptr;
         ShareMemStatus* curBufStatus = nullptr;
@@ -450,18 +495,11 @@ uint8_t* DirectTrans::__getReadablePtr()
                                             (rcptr * (sizeof(ShareMemStatus) + mHeaderPtr->size)));
 
             // 检查当前状态是否处于 Wait，只有当状态变为 Wait 时才可以读取
-            if(curBufStatus->status == DirectTransWait)
+            if(curBufStatus->status == DirectTransWait || curBufStatus->status == DirectTransRead)
             {
                 // 获取可用指针
                 curBufStatus->status = DirectTransRead; // 将这个buffer设置为写入状态
                 rbuffer = (uint8_t*)curBufStatus;
-
-                timeval rect;
-                gettimeofday(&rect, nullptr);
-
-                uint64_t sendt = curBufStatus->timestamp.tv_sec * 1e6 + \
-                                curBufStatus->timestamp.tv_usec;
-                uint64_t dt = rect.tv_sec * 1e6 + rect.tv_usec - sendt;
                 break;
             }
             else
@@ -490,6 +528,13 @@ void DirectTrans::__releaseWritablePtr(uint8_t* p)
         pStatus->status = DirectTransWait;// 切换内存状态到等待读取状态
         size_t &wcptr = mHeaderPtr->cur_write_ptr;
         wcptr = (wcptr + 1) % mHeaderPtr->num_of_buf;// 移动写指针到下一个buffer
+
+        if(__getAttchedNum(mShareMemId) < 2)
+        {
+            size_t &rcptr = mHeaderPtr->cur_read_ptr;
+            rcptr = wcptr - 1;
+        }
+
         pthread_mutex_unlock(&mHeaderPtr->share_mutex);
     }
     else
@@ -501,17 +546,47 @@ void DirectTrans::__releaseWritablePtr(uint8_t* p)
 }
 void DirectTrans::__releaseReadablePtr(uint8_t* p)
 {
-    // 进行加锁
-    int r = __timedMutexLock(&mHeaderPtr->share_mutex, RECV_LOCK_TIME_OUT);
-    if(r == 0)
+    bool isCnt = false;
+    while (true)
     {
-        ShareMemStatus *pStatus = (ShareMemStatus*)(p);
+        // 进行加锁
+        int r = __timedMutexLock(&mHeaderPtr->share_mutex, RECV_LOCK_TIME_OUT);
+        if (r == 0)
+        {
+            ShareMemStatus *pStatus = (ShareMemStatus *)(p);
 
-        pStatus->status = DirectTransFree;// 修改内存状态
-        size_t &rcptr = mHeaderPtr->cur_read_ptr;
-        rcptr = (rcptr + 1) % mHeaderPtr->num_of_buf;// 移动指针到下一个buffer
+            if(!isCnt)
+            {
+                pStatus->num_of_read_time += 1;
+                isCnt = true;
+            }
 
-        pthread_mutex_unlock(&mHeaderPtr->share_mutex);
+            // 如果当前缓存被读取的次数不足，则继续等待
+            if (pStatus->num_of_read_time >= __getAttchedNum(mShareMemId) - 1 ||
+                pStatus->status != DirectTransRead)
+            {
+                if(pStatus->status == DirectTransRead)
+                {
+                    pStatus->num_of_read_time = 0;
+                    pStatus->status = DirectTransFree; // 修改内存状态
+                }
+
+                size_t &rcptr = mSelfReadCnt;
+                rcptr = (rcptr + 1) % mHeaderPtr->num_of_buf; // 移动指针到下一个buffer
+                pthread_mutex_unlock(&mHeaderPtr->share_mutex);
+                break;
+            }
+            else
+            {
+                pthread_mutex_unlock(&mHeaderPtr->share_mutex);
+                usleep(0);
+            }
+        }
+        else
+        {
+            __checkReadWaitFreeAndUnlock();
+        }
+        
     }
     return;
 }
@@ -558,4 +633,63 @@ void DirectTrans::__checkErrorCode(const int e)
             break;
     }
 }
+
+bool DirectTrans::__checkOk()
+{
+    pid_t pid = getpid();
+}
+
+void DirectTrans::__checkFreeWriteAndUnlock()
+{
+    bool isFree = true;
+    ShareMemStatus* curBufStatus = nullptr;
+
+    for(int i = 0; i < mHeaderPtr->num_of_buf; i++)
+    {
+        // 获取当前状态
+        curBufStatus = (ShareMemStatus*)(mShareBufs + \
+                                        (i * (sizeof(ShareMemStatus) + mHeaderPtr->size)));
+        if(curBufStatus->status == DirectTransFree ||
+           curBufStatus->status == DirectTransWrite)
+        {
+            continue;
+        }
+        else
+        {
+            isFree = false;
+        }
+    }
+    if(isFree)
+    {
+        pthread_mutex_unlock(&mHeaderPtr->share_mutex);
+    }
+}
+
+void DirectTrans::__checkReadWaitFreeAndUnlock()
+{
+    bool isFree = true;
+    ShareMemStatus* curBufStatus = nullptr;
+
+    for(int i = 0; i < mHeaderPtr->num_of_buf; i++)
+    {
+        // 获取当前状态
+        curBufStatus = (ShareMemStatus*)(mShareBufs + \
+                                        (i * (sizeof(ShareMemStatus) + mHeaderPtr->size)));
+        if(curBufStatus->status == DirectTransFree ||
+            curBufStatus->status == DirectTransWait ||
+            curBufStatus->status == DirectTransRead)
+        {
+            continue;
+        }
+        else
+        {
+            isFree = false;
+        }
+    }
+    if(isFree)
+    {
+        pthread_mutex_unlock(&mHeaderPtr->share_mutex);
+    }
+}
+
 } // namespace communicator

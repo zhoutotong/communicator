@@ -16,14 +16,30 @@ namespace communicator
 
 class Interface
 {
-protected:
-// typedef void(*RecvCallback)(const uint8_t *buf, uint32_t len);
-
-using RecvCallback = std::function<void (uint8_t *, uint32_t)>;
-
 
 public:
-    Interface(const AString &name) : mInterfaceName(name), mRecvCb(nullptr){}
+    
+    enum _TransMode {
+        TransFullDuplex,
+        TransHalfDuplex,
+        TransSendSimplex,
+        TransRecvSimplex,
+    };
+
+protected:
+
+// 回调接口定义
+using RecvCallback = std::function<void (uint8_t *, uint32_t)>;
+
+public:
+// 定义工作模式
+using TransMode = _TransMode;
+
+public:
+    Interface(const AString &name, const TransMode &mode = TransFullDuplex)
+     : mInterfaceName(name)
+     , mRecvCb(nullptr)
+     , mTransMode(mode){}
     ~Interface(){};
 
     // 初始化参数配置
@@ -56,6 +72,7 @@ private:
 protected:
     const AString mInterfaceName;
     RecvCallback mRecvCb;
+    const TransMode mTransMode;
 
 
 };

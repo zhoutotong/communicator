@@ -5,6 +5,7 @@
 #include <string.h>
 #include <thread>
 #include <sys/time.h>
+#include <unistd.h>
 
 
 namespace communicator
@@ -19,6 +20,7 @@ private:
         DirectTransWait = 2,   ///< 此状态下可读不可写
         DirectTransRead = 3,   ///< 此状态下正在进行读出操作
     };
+
     struct _DirectTransParams {
         size_t num_of_buf;
         size_t size;
@@ -33,12 +35,15 @@ private:
         size_t seq;
         size_t size;
         timeval timestamp;
+        pid_t sender_pid;
+        char sender_name[256];
     };
 
     struct _ShareMemStatus {
         _DirectTransStatus status;
         size_t busy_read_cnt;    ///< 在尝试写入时，如该buffer处于读状态，则该计数加1
         size_t size;
+        size_t num_of_read_time;
         timeval timestamp;
     };
 
@@ -51,7 +56,7 @@ public:
     typedef _DirectTransStatus DirectTransStatus;
 
 public:
-    DirectTrans(const awe::AString &name, const int id = 0);
+    DirectTrans(const awe::AString &name, const int id = 0, const TransMode &mode = TransFullDuplex);
     ~DirectTrans();
     // 初始化参数配置
     virtual void setup(const void* cfg, uint32_t len) override;
@@ -94,6 +99,8 @@ private:
     ShareMemHead *mHeaderPtr;
     uint8_t *mShareBufs;
 
+    size_t mSelfReadCnt;
+
     enum {
         SEND_LOCK_TIME_OUT = 500000,
         RECV_LOCK_TIME_OUT = 500000,
@@ -110,6 +117,10 @@ private:
 
     int __timedMutexLock(pthread_mutex_t *m, uint32_t usec);
     void __checkErrorCode(const int e);
+
+    bool __checkOk();// 检查是否满足创建共享内存条件
+    void __checkFreeWriteAndUnlock();
+    void __checkReadWaitFreeAndUnlock();
 
 
 };

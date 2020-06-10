@@ -8,9 +8,17 @@ communicator::Interface *interface;
 void recvCallback(const uint8_t *buf, uint32_t len)
 {
     // std::cout << "recv data: " << (char*)buf << " " << interface->getRecvSeq() << std::endl;
+    timeval sendTime;
+    memcpy(&sendTime, &buf[1024], sizeof(timeval));
+
+    timeval tv;
+    gettimeofday(&tv, nullptr);
+
+    uint64_t dt = tv.tv_sec * 1000000 + tv.tv_usec - sendTime.tv_sec * 1000000 - sendTime.tv_usec;
+
     static size_t cnt = 0;
     cnt++;
-    std::cout << "recv cnt: " << cnt << " - " << (char*)buf << std::endl;
+    std::cout << "recv cnt: " << cnt << " - " << (char*)buf << " dt: " << dt << std::endl;
 }
 
 int main(int argc, char *argv[])

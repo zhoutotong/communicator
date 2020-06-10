@@ -17,6 +17,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC")
 INCLUDE_DIRECTORIES(
 ./
 ./include
+./utilities
 )
 
 # 子目录
