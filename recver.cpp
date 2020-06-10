@@ -16,9 +16,27 @@ void recvCallback(const uint8_t *buf, uint32_t len)
 
     uint64_t dt = tv.tv_sec * 1000000 + tv.tv_usec - sendTime.tv_sec * 1000000 - sendTime.tv_usec;
 
+    static uint64_t sum = 0;
+    static uint64_t max = dt, min = dt;
+
+    max = max > dt ? max : dt;
+    min = min < dt ? min : dt;
+    sum += dt;
+
+
     static size_t cnt = 0;
     cnt++;
-    std::cout << "recv cnt: " << cnt << " - " << (char*)buf << " dt: " << dt << std::endl;
+
+    double aver = (double)(sum - max - min) / (double)(cnt - 2);
+
+    static size_t large_cnt = 0;
+    if(dt > 3.0 * aver)
+    {
+        large_cnt++;
+    }
+
+    std::cout << "recv cnt: " << cnt << " max: " << max << " min: " << min << " aver: " << aver <<\
+     " large cnt(%): " << (double)large_cnt / (double)cnt << " - " << (char*)buf << " dt: " << dt << std::endl;
 }
 
 int main(int argc, char *argv[])
