@@ -38,7 +38,7 @@ int main(int argc, char *argv[])
         memcpy(&pbuf[1024], &tv, sizeof(timeval));
         interface->send(pbuf, params.size);
         // std::cout << "send data: " << interface->getSendSeq() << std::endl;
-        usleep(1);
+        // usleep(1);
         cnt++;
         std::cout << "send cnt: " << cnt << std::endl;
     }

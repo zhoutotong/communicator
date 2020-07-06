@@ -354,34 +354,54 @@ void DirectTrans::installRecvCallback(const RecvCallback cb)
         throw AException("There Are Already Has Rec Cb.");
     }
     mRecvCb = cb;
-    mRecThread = new std::thread(
-        [this](){
-            mIsRecWorking = true;
-            while(mIsRecWorking)
-            {
-                uint8_t* pbuf = __getReadablePtr();
-                ShareMemStatus* pStatus = (ShareMemStatus*)pbuf;
-                pbuf += sizeof(ShareMemStatus);
+    // mRecThread = new std::thread(
+    //     [this](){
+    //         mIsRecWorking = true;
+    //         while(mIsRecWorking)
+    //         {
+    //             uint8_t* pbuf = __getReadablePtr();
+    //             ShareMemStatus* pStatus = (ShareMemStatus*)pbuf;
+    //             pbuf += sizeof(ShareMemStatus);
 
-                if(pStatus)
-                {
-                    // 计算延迟
-                    timeval tv;
-                    gettimeofday(&tv, nullptr);
-                    int dt = -(pStatus->timestamp.tv_sec * 1e6 + pStatus->timestamp.tv_usec \
-                                    - tv.tv_usec - (tv.tv_sec * 1e6));
-                    // 取出数据区域
-                    mRecvCb(pbuf, pStatus->size);
-                    mRecvSeq++;
-                    __releaseReadablePtr((uint8_t*)pStatus);
-                }
-                else
-                {
-                    usleep(10);
-                }
-            }
-        }
-    );
+    //             if(pStatus)
+    //             {
+    //                 // 计算延迟
+    //                 timeval tv;
+    //                 gettimeofday(&tv, nullptr);
+    //                 int dt = -(pStatus->timestamp.tv_sec * 1e6 + pStatus->timestamp.tv_usec \
+    //                                 - tv.tv_usec - (tv.tv_sec * 1e6));
+    //                 // 取出数据区域
+    //                 mRecvCb(pbuf, pStatus->size);
+    //                 mRecvSeq++;
+    //                 __releaseReadablePtr((uint8_t*)pStatus);
+    //             }
+    //             else
+    //             {
+    //                 usleep(10);
+    //             }
+    //         }
+    //     }
+    // );
+}
+
+void DirectTrans::spinOnce()
+{
+    uint8_t* pbuf = __getReadablePtr();
+    ShareMemStatus* pStatus = (ShareMemStatus*)pbuf;
+    pbuf += sizeof(ShareMemStatus);
+
+    if(pStatus)
+    {
+        // 计算延迟
+        timeval tv;
+        gettimeofday(&tv, nullptr);
+        int dt = -(pStatus->timestamp.tv_sec * 1e6 + pStatus->timestamp.tv_usec \
+                        - tv.tv_usec - (tv.tv_sec * 1e6));
+        // 取出数据区域
+        mRecvCb(pbuf, pStatus->size);
+        mRecvSeq++;
+        __releaseReadablePtr((uint8_t*)pStatus);
+    }
 }
 
 int DirectTrans::__getAttchedNum(int id)

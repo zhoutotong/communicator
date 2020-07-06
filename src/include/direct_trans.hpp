@@ -75,6 +75,9 @@ public:
 
     void installRecvCallback(const RecvCallback cb) override;
 
+    // 事件循环
+    void spinOnce() override;
+
     inline size_t getSendSeq() override { return mSendSeq; }
     inline size_t getRecvSeq() override { return mRecvSeq; }
 

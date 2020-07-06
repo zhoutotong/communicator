@@ -62,6 +62,8 @@ public:
     // 设置数据接收回调，设置后将屏蔽非堵塞接收数据方法
     virtual void installRecvCallback(const RecvCallback cb) { mRecvCb = cb; };
 
+    virtual void spinOnce() = 0;
+
 
     // 获取传输包信息
     virtual size_t getSendSeq() { UNSUPORT_FUNC_EXCEPTION(mInterfaceName); };

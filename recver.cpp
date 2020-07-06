@@ -37,6 +37,7 @@ void recvCallback(const uint8_t *buf, uint32_t len)
 
     std::cout << "recv cnt: " << cnt << " max: " << max << " min: " << min << " aver: " << aver <<\
      " large cnt(%): " << (double)large_cnt / (double)cnt << " - " << (char*)buf << " dt: " << dt << std::endl;
+    //  usleep(10000);
 }
 
 int main(int argc, char *argv[])
@@ -55,7 +56,9 @@ int main(int argc, char *argv[])
 
     while(true)
     {
-        sleep(1);
+        interface->spinOnce();
+        usleep(10);
+        // sleep(1);
     }
 
     interface->release();
