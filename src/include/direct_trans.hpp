@@ -57,7 +57,7 @@ public:
 
 public:
     DirectTrans(const awe::AString &name, const int id = 0, const TransMode &mode = TransFullDuplex);
-    ~DirectTrans();
+    ~DirectTrans() override;
     // 初始化参数配置
     virtual void setup(const void* cfg, uint32_t len) override;
     // 释放通信资源

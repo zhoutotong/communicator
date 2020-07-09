@@ -211,7 +211,6 @@ void DirectTrans::release()
             mRecThread = nullptr;
         }
     }
-
     // 解除挂接状态
     if(mShareMemPtr != nullptr)
     {
@@ -220,7 +219,7 @@ void DirectTrans::release()
             // 销毁互斥锁
             pthread_mutex_destroy(&static_cast<ShareMemHead*>(mShareMemPtr)->share_mutex);
         }
-        
+
         int r = shmdt(mShareMemPtr);
         if(-1 == r)
         {
@@ -228,28 +227,34 @@ void DirectTrans::release()
             ss << "Detach Shared Mem Failed(" << errno << ").";
             throw AException(ss.str());
         }
+        else
+        {
+            mShareMemPtr = nullptr;
+        }
+        // 尝试删除创建的共享内存，如果当前连接的进程数量为 0 ，那么就删除这片共享内存，否则不处理
+        if(0 == __getAttchedNum(mShareMemId))
+        {
+            // 删除共享内存
+            int r = shmctl(mShareMemId, IPC_RMID, nullptr);
+            if(-1 == r)
+            {
+                std::stringstream ss;
+                ss << "Remove Shared Mem Id Failed(" << errno << ").";
+                throw AException(ss.str());
+            }
+            // 删除对应的文件
+            r = remove(mInterfaceName.c_str());
+            if(r < 0)
+            {
+                std::stringstream ss;
+                ss << "Share Mem File Remove Failed(" << errno << ").";
+                throw AException(ss.str());
+            }
+        }
+
     }
 
-    // 尝试删除创建的共享内存，如果当前连接的进程数量为 0 ，那么就删除这片共享内存，否则不处理
-    if(0 == __getAttchedNum(mShareMemId))
-    {
-        // 删除共享内存
-        int r = shmctl(mShareMemId, IPC_RMID, nullptr);
-        if(-1 == r)
-        {
-            std::stringstream ss;
-            ss << "Remove Shared Mem Id Failed(" << errno << ").";
-            throw AException(ss.str());
-        }
-        // 删除对应的文件
-        r = remove(mInterfaceName.c_str());
-        if(r < 0)
-        {
-            std::stringstream ss;
-            ss << "Share Mem File Remove Failed(" << errno << ").";
-            throw AException(ss.str());
-        }
-    }
+
 }
 
 // 设置发送目标
@@ -549,11 +554,12 @@ void DirectTrans::__releaseWritablePtr(uint8_t* p)
         size_t &wcptr = mHeaderPtr->cur_write_ptr;
         wcptr = (wcptr + 1) % mHeaderPtr->num_of_buf;// 移动写指针到下一个buffer
 
-        if(__getAttchedNum(mShareMemId) < 2)
-        {
-            size_t &rcptr = mHeaderPtr->cur_read_ptr;
-            rcptr = wcptr - 1;
-        }
+        size_t &rcptr = mHeaderPtr->cur_read_ptr;
+		
+		if(wcptr > 0)
+		{
+		    rcptr = wcptr - 1;
+		}
 
         pthread_mutex_unlock(&mHeaderPtr->share_mutex);
     }
@@ -630,6 +636,13 @@ int DirectTrans::__timedMutexLock(pthread_mutex_t *m, uint32_t usec)
         gettimeofday(&tv, nullptr);
         now = tv.tv_sec * 1000000 + tv.tv_usec;
         usleep(5);
+
+	if(__getAttchedNum(mShareMemId) == 1)
+        {
+             pthread_mutex_unlock(m);
+        }
+
+
     }
 
     return r;

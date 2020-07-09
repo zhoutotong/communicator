@@ -41,6 +41,7 @@ int main(int argc, char *argv[])
         // usleep(1);
         cnt++;
         std::cout << "send cnt: " << cnt << std::endl;
+        if(cnt > 100) break;
     }
 
     interface->release();

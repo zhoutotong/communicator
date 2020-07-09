@@ -54,10 +54,13 @@ int main(int argc, char *argv[])
 
     interface->installRecvCallback(recvCallback);
 
+    int cnt = 0;
     while(true)
     {
         interface->spinOnce();
         usleep(10);
+        cnt++;
+        // if(cnt > 100) break;
         // sleep(1);
     }
 

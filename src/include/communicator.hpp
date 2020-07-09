@@ -40,7 +40,7 @@ public:
      : mInterfaceName(name)
      , mRecvCb(nullptr)
      , mTransMode(mode){}
-    ~Interface(){};
+    virtual ~Interface(){};
 
     // 初始化参数配置
     virtual void setup(const void* cfg, uint32_t len){}
